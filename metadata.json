@@ -1,0 +1,5 @@
+{
+  "name": "Diário Oficial Observador",
+  "description": "Automated monitoring tool for São João del-Rei Official Gazette. Scrapes for new PDF documents, extracts text, and generates AI-powered summaries using Gemini.",
+  "requestFramePermissions": []
+}
