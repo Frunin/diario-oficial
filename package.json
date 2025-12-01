@@ -17,8 +17,8 @@
     "@google/genai": "*",
     "react-markdown": "^9.0.1",
     "pdfjs-dist": "^4.2.67",
-    "puppeteer-core": "^23.1.0",
-    "@sparticuz/chromium": "^127.0.0"
+    "puppeteer-core": "22.6.0",
+    "@sparticuz/chromium": "123.0.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

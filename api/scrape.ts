@@ -6,29 +6,41 @@ export const config = {
   maxDuration: 60, 
 };
 
-// Fallback fetch function if Puppeteer fails
+// Robust Fallback: Tries standard fetch, then a public proxy if blocked
 async function fetchFallback(url: string) {
     console.log("[Fallback] Puppeteer failed, attempting standard fetch...");
-    const response = await fetch(url, {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-        }
-    });
+    
+    // 1. Try direct fetch with heavy spoofing
+    try {
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+        });
 
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Fallback Fetch Failed: ${response.status} ${response.statusText}`);
+        if (response.ok) {
+            return await response.text();
+        }
+        console.log(`[Fallback] Direct fetch failed: ${response.status}`);
+    } catch (e) {
+        console.log(`[Fallback] Direct fetch error:`, e);
     }
 
-    return await response.text();
+    // 2. Try AllOrigins Proxy (Bypasses 403 Forbidden on the server side)
+    console.log("[Fallback] Attempting via AllOrigins Proxy...");
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const proxyResponse = await fetch(proxyUrl);
+    
+    if (!proxyResponse.ok) {
+        throw new Error(`All fallbacks failed. Proxy Status: ${proxyResponse.status}`);
+    }
+    
+    return await proxyResponse.text();
 }
 
 export default async function handler(request: any, response: any) {
-  // CORS Headers
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -53,7 +65,6 @@ export default async function handler(request: any, response: any) {
   try {
     const isLocal = !process.env.AWS_REGION && !process.env.VERCEL_REGION;
     
-    // Configure Chromium executable path
     let executablePath = "";
     if (isLocal) {
         if (process.platform === 'win32') {
@@ -64,67 +75,128 @@ export default async function handler(request: any, response: any) {
             executablePath = '/usr/bin/google-chrome';
         }
     } else {
-        // Standard Vercel/AWS environment path resolution
+        // Specific to @sparticuz/chromium 123.x
         executablePath = await chromium.executablePath();
     }
 
+    if (!isLocal) {
+       chromium.setGraphicsMode = false;
+    }
+
     browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--single-process', // Important for serverless
-        '--no-zygote'
-      ],
-      defaultViewport: { width: 1920, height: 1080 },
+      args: isLocal ? [] : [...chromium.args, '--disable-gpu', '--disable-dev-shm-usage', '--disable-setuid-sandbox', '--no-sandbox', '--no-zygote'],
+      defaultViewport: (chromium as any).defaultViewport,
       executablePath: executablePath,
-      headless: isLocal ? false : true,
+      headless: isLocal ? false : (chromium as any).headless,
       ignoreHTTPSErrors: true,
     } as any);
 
     const page = await browser.newPage();
     
-    // Spoof User Agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-    
-    await page.setExtraHTTPHeaders({
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-    });
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8' });
 
-    await page.goto(targetUrl, { 
-      waitUntil: 'domcontentloaded', 
-      timeout: 25000 
-    });
+    // Open the page
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
-    // Simple 403 check
     const title = await page.title();
-    if (title.includes("403") || title.includes("Forbidden") || title.includes("Access Denied")) {
-        throw new Error("403_FORBIDDEN_DETECTED_IN_PUPPETEER");
+    if (title.includes("403") || title.includes("Forbidden")) {
+        throw new Error("403_FORBIDDEN_DETECTED");
     }
 
-    // Attempt to wait for content, but allow fallback if selector is missing
+    // Wait for the dynamic content to build
     try {
         await page.waitForSelector('#conteudo_generico_1014', { timeout: 5000 });
     } catch (e) {
-        // Selector not found, proceeding with raw content
+        console.log("Selector wait timeout - proceeding anyway");
     }
 
-    const html = await page.content();
-    response.status(200).json({ success: true, html });
+    // EXECUTE PARSING LOGIC INSIDE THE BROWSER
+    // This looks for the pattern, caches ID, and builds the URL
+    const extractedDocs = await page.evaluate(() => {
+        const docs = [];
+        const container = document.getElementById('conteudo_generico_1014');
+        if (!container) return [];
 
-  } catch (error) {
-    console.error('Puppeteer Error:', error);
+        const rows = container.querySelectorAll('[id="contenedor_registro_generico"]');
+        
+        // Helper to clean text
+        const clean = (text) => text ? text.replace(/&nbsp;/g, ' ').trim() : '';
+
+        rows.forEach(row => {
+            // 1. Extract ID from onclick pattern
+            const linkElement = row.querySelector('[onclick*="obterArquivoCadastroGenerico"]');
+            if (!linkElement) return;
+
+            const onclickText = linkElement.getAttribute('onclick');
+            const idMatch = onclickText && onclickText.match(/obterArquivoCadastroGenerico\s*\(\s*(\d+)\s*\)/);
+            
+            if (!idMatch || !idMatch[1]) return;
+            const id = idMatch[1];
+
+            // 2. Build the Full URL
+            const pdfUrl = `https://saojoaodelrei.mg.gov.br/Obter_Arquivo_Cadastro_Generico.php?INT_ARQ=${id}&LG_ADM=undefined`;
+
+            // 3. Extract Metadata
+            let publicationDate = '';
+            let editionLabel = '';
+            let siteSummary = '';
+
+            const infoBlocks = row.querySelectorAll('[id="informacao_generica"]');
+            infoBlocks.forEach(block => {
+                const titleEl = block.querySelector('[id="titulo_generico"]');
+                const valueEl = block.querySelector('[id="valor_generico"]');
+                
+                if (titleEl && valueEl) {
+                    const label = clean(titleEl.textContent).toLowerCase();
+                    const value = clean(valueEl.textContent);
+
+                    if (label.includes('data')) publicationDate = value;
+                    if (label.includes('edição')) editionLabel = `Edição ${value}`;
+                    if (label.includes('resumo')) siteSummary = value;
+                }
+            });
+
+            // Clean up summary HTML breaks
+            siteSummary = siteSummary.replace(/<br\s*\/?>/gi, '\n').trim();
+
+            docs.push({
+                id,
+                url: pdfUrl,
+                publicationDate,
+                editionLabel,
+                contentSummary: siteSummary,
+                title: editionLabel || `Diário Oficial (ID: ${id})`
+            });
+        });
+
+        return docs;
+    });
+
+    response.status(200).json({ 
+        success: true, 
+        mode: 'json', 
+        data: extractedDocs 
+    });
+
+  } catch (error: any) {
+    console.error('Puppeteer Error:', error.message);
     
     try {
+        // If Puppeteer fails, fallback to HTML mode
+        // The frontend will have to do the parsing
         const html = await fetchFallback(targetUrl);
-        response.status(200).json({ success: true, html, note: "Served via Fallback Fetch" });
-    } catch (fallbackError) {
-        console.error('Fallback Error:', fallbackError);
+        response.status(200).json({ 
+            success: true, 
+            mode: 'html', 
+            html, 
+            note: "Served via Fallback (Proxy/Fetch)" 
+        });
+    } catch (fallbackError: any) {
+        console.error('Fallback Error:', fallbackError.message);
         response.status(500).json({ 
             success: false, 
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: error.message || 'Unknown error',
             details: "Puppeteer and Fallback both failed."
         });
     }

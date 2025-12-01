@@ -1,9 +1,8 @@
 export const config = {
-  runtime: 'nodejs', // Node.js runtime required for buffer handling
+  runtime: 'nodejs', 
 };
 
 export default async function handler(request, response) {
-  // CORS Headers
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -24,23 +23,29 @@ export default async function handler(request, response) {
   }
 
   try {
-    // Attempt direct fetch with browser-like headers
     const fetchResponse = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'application/pdf,application/octet-stream,*/*',
         'Referer': 'https://saojoaodelrei.mg.gov.br/',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive'
       }
     });
 
     if (!fetchResponse.ok) {
-        console.warn(`Direct PDF fetch failed (${fetchResponse.status}). Trying fallback...`);
-        
-        // Fallback: corsproxy.io (Good for bypassing simple header checks)
-        const fallbackUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
-        const fallbackRes = await fetch(fallbackUrl);
+        throw new Error(`Direct fetch failed: ${fetchResponse.status}`);
+    }
+
+    const arrayBuffer = await fetchResponse.arrayBuffer();
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Cache-Control', 'public, max-age=3600');
+    response.send(Buffer.from(arrayBuffer));
+
+  } catch (error) {
+    console.error('PDF Direct Error:', error);
+    
+    // Proxy Fallback for PDFs
+    try {
+        const corsProxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+        const fallbackRes = await fetch(corsProxyUrl);
         
         if (fallbackRes.ok) {
             const buffer = await fallbackRes.arrayBuffer();
@@ -48,22 +53,10 @@ export default async function handler(request, response) {
             response.send(Buffer.from(buffer));
             return;
         }
-
-        response.status(fetchResponse.status).send(`Failed to fetch PDF. Direct: ${fetchResponse.statusText}. Fallback: ${fallbackRes.statusText}`);
-        return;
+    } catch (e) {
+        console.error('PDF Fallback Error:', e);
     }
 
-    const arrayBuffer = await fetchResponse.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    response.setHeader('Content-Type', 'application/pdf');
-    // Cache for 1 hour to reduce load on source
-    response.setHeader('Cache-Control', 'public, max-age=3600');
-    response.send(buffer);
-
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('PDF Proxy Error:', msg);
-    response.status(500).send(`Internal Server Error: ${msg}`);
+    response.status(500).send(`Failed to fetch PDF.`);
   }
 }
