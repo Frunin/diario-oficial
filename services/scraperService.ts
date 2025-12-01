@@ -43,6 +43,12 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
                 throw new Error(`API Backend não encontrada no endereço ${API_BASE}. Verifique o deploy no Vercel.`);
             }
             const errText = await localRes.text().catch(() => 'Sem detalhes');
+            
+            // Check for specific blockage errors
+            if (errText.includes("403") || errText.includes("Forbidden")) {
+                throw new Error("O site oficial recusou a conexão (Erro 403). O firewall da prefeitura pode estar bloqueando acessos via nuvem temporariamente.");
+            }
+
             throw new Error(`Proxy respondeu com status: ${localRes.status} (${errText})`);
         }
 
@@ -65,6 +71,10 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
 
             return data.html;
         } else {
+            // Check for nested errors from the JSON
+            if (data.error && (data.error.includes("403") || data.error.includes("Forbidden"))) {
+                 throw new Error("O site oficial recusou a conexão (Erro 403). Bloqueio de segurança detectado.");
+            }
             throw new Error(data.error || "Proxy não retornou HTML.");
         }
 
@@ -72,7 +82,7 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Fetch] Erro fatal: ${msg}`);
         throw new Error(
-            `Falha na conexão. ${msg}`
+            `Falha na conexão: ${msg}`
         );
     }
 }

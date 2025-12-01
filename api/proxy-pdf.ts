@@ -28,12 +28,15 @@ export default async function handler(request: Request) {
   try {
     const response = await fetch(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://saojoaodelrei.mg.gov.br/'
       }
     });
 
     if (!response.ok) {
-       return new Response(`Failed to fetch PDF: ${response.statusText}`, { 
+       return new Response(`Failed to fetch PDF: ${response.status} ${response.statusText}`, { 
          status: response.status,
          headers: corsHeaders
        });
@@ -51,7 +54,8 @@ export default async function handler(request: Request) {
       }
     });
   } catch (e) {
-    return new Response('Internal Server Error', { 
+    const msg = e instanceof Error ? e.message : String(e);
+    return new Response(`Internal Server Error: ${msg}`, { 
       status: 500,
       headers: corsHeaders
     });
