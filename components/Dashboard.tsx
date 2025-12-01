@@ -262,10 +262,21 @@ export const Dashboard: React.FC = () => {
                                       ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-200' 
                                       : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'}`}
                           >
-                              <div className="flex justify-between items-start gap-2">
-                                  <span className="text-sm font-medium text-slate-700 leading-snug line-clamp-2">
-                                      {doc.title}
-                                  </span>
+                              <div className="flex flex-col gap-1">
+                                  {doc.editionLabel ? (
+                                    <>
+                                      <span className="text-sm font-bold text-slate-800">
+                                          {doc.editionLabel}
+                                      </span>
+                                      <span className="text-xs text-slate-500 line-clamp-1 border-t border-slate-100 pt-1 mt-1">
+                                          {doc.title}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-sm font-medium text-slate-700 leading-snug line-clamp-2">
+                                        {doc.title}
+                                    </span>
+                                  )}
                               </div>
                               <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
                                   <span className="flex items-center gap-1">
@@ -293,11 +304,14 @@ export const Dashboard: React.FC = () => {
                 <div className="flex justify-between items-start gap-4">
                   <div>
                       <h1 className="text-xl font-bold text-slate-900 leading-tight">
-                      {selectedDoc.title}
+                        {selectedDoc.editionLabel ? selectedDoc.editionLabel : selectedDoc.title}
                       </h1>
-                      <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
-                      Identificado em: {selectedDoc.dateFound ? new Date(selectedDoc.dateFound).toLocaleDateString() : '-'}
+                      {selectedDoc.editionLabel && (
+                        <h2 className="text-sm text-slate-600 mt-1">{selectedDoc.title}</h2>
+                      )}
+                      <p className="text-sm text-slate-500 mt-2 flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        Identificado em: {selectedDoc.dateFound ? new Date(selectedDoc.dateFound).toLocaleDateString() : '-'}
                       </p>
                   </div>
                   <a 

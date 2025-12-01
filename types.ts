@@ -6,6 +6,7 @@ export interface GazetteDocument {
   contentSummary?: string;
   isNew: boolean;
   rawText?: string;
+  editionLabel?: string;
 }
 
 export enum ScrapeStatus {
