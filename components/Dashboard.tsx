@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   RefreshCw, 
   FileText, 
-  Clock, 
   CheckCircle, 
   Loader2,
   Calendar,
@@ -11,10 +10,11 @@ import {
   Archive,
   Terminal,
   Search,
-  Globe
+  Globe,
+  AlertTriangle
 } from 'lucide-react';
 import { checkForNewGazette } from '../services/scraperService';
-import { GazetteDocument, ScrapeStatus, ScrapeLog, AppSettings } from '../types';
+import { GazetteDocument, ScrapeStatus, ScrapeLog, AppSettings } from '../services/types';
 import ReactMarkdown from 'react-markdown';
 
 export const Dashboard: React.FC = () => {
@@ -120,6 +120,14 @@ export const Dashboard: React.FC = () => {
     return () => clearInterval(timer);
   }, [settings.morningCheck, settings.nightCheck, performCheck]);
 
+  const getLogColor = (status: string) => {
+    switch (status) {
+      case 'SUCCESS': return 'text-green-400';
+      case 'FAILURE': return 'text-red-400';
+      case 'NO_CHANGE': return 'text-slate-400';
+      default: return 'text-blue-400';
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto p-6 flex flex-col gap-6">
@@ -155,21 +163,12 @@ export const Dashboard: React.FC = () => {
             ) : (
                 logs.slice().reverse().map((log) => (
                     <div key={log.id} className="mb-2 border-l-2 border-slate-800 pl-3 py-1 hover:bg-white/5 transition-colors">
-                        <div className="flex items-center gap-3 mb-1">
-                            <span className="text-slate-500">
-                                {new Date(log.timestamp).toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}
-                            </span>
-                            <span className={`font-bold px-1.5 rounded text-[10px] 
-                                ${log.status === 'SUCCESS' ? 'bg-green-500/10 text-green-400' : 
-                                log.status === 'FAILURE' ? 'bg-red-500/10 text-red-400' : 
-                                log.status === 'INFO' ? 'bg-blue-500/10 text-blue-400' :
-                                'bg-slate-700/50 text-slate-400'}`}>
-                                {log.status}
-                            </span>
+                        <div className="flex items-center gap-2">
+                             <span className="text-slate-500">[{log.timestamp.split('T')[1].split('.')[0]}]</span>
+                             <span className={`font-bold ${getLogColor(log.status)}`}>{log.status}</span>
+                             {log.documentTitle && <span className="px-1.5 py-0.5 bg-slate-800 rounded text-slate-300">{log.documentTitle}</span>}
                         </div>
-                        <div className="text-slate-300 pl-[4.5rem] break-words leading-relaxed">
-                            {log.message}
-                        </div>
+                        <div className="text-slate-300 pl-2 mt-0.5 whitespace-pre-wrap">{log.message}</div>
                     </div>
                 ))
             )}
@@ -178,186 +177,160 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left Column: Controls & Status (3 cols) */}
-        <div className="lg:col-span-3 space-y-6">
-          
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Globe className={`w-5 h-5 ${status === ScrapeStatus.CHECKING ? 'animate-spin' : ''}`} />
-              Monitoramento
-            </h2>
-            
-            <div className="space-y-4">
-              <button
-                onClick={performCheck}
-                disabled={status === ScrapeStatus.CHECKING}
-                className={`w-full py-3 px-4 rounded-lg font-medium text-white transition-all
-                  ${status !== ScrapeStatus.CHECKING
-                    ? 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg' 
-                    : 'bg-slate-400 cursor-not-allowed'}`}
-              >
-                {status === ScrapeStatus.CHECKING ? 'Pesquisando...' : 'Buscar Atualizações'}
-              </button>
-
-              {status === ScrapeStatus.CHECKING && (
-                <div className="flex items-center gap-3 text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                    <span className="font-medium">Consultando Google Search...</span>
-                </div>
-              )}
+      {/* Main Status Card */}
+      <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-start gap-5">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 transition-colors duration-500
+              ${status === ScrapeStatus.CHECKING ? 'bg-blue-50 text-blue-600' : 
+                status === ScrapeStatus.ERROR ? 'bg-red-50 text-red-600' : 
+                'bg-green-50 text-green-600'}`}>
+               {status === ScrapeStatus.CHECKING ? <Loader2 className="w-7 h-7 animate-spin" /> : 
+                status === ScrapeStatus.ERROR ? <AlertTriangle className="w-7 h-7" /> :
+                <CheckCircle className="w-7 h-7" />}
             </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              Agendamento
-            </h2>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Manhã</label>
-                <input 
-                  type="time" 
-                  value={settings.morningCheck}
-                  onChange={(e) => setSettings(s => ({...s, morningCheck: e.target.value}))}
-                  className="w-full border border-slate-300 rounded-md p-2 bg-white text-slate-900 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Noite</label>
-                <input 
-                  type="time" 
-                  value={settings.nightCheck}
-                  onChange={(e) => setSettings(s => ({...s, nightCheck: e.target.value}))}
-                  className="w-full border border-slate-300 rounded-md p-2 bg-white text-slate-900 outline-none"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Middle Column: Document List (3 cols) */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex-1 flex flex-col">
-              <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <Search className="w-5 h-5 text-indigo-600" />
-                Resultados
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">
+                {status === ScrapeStatus.CHECKING ? 'Verificando atualizações...' : 
+                 status === ScrapeStatus.ERROR ? 'Erro na verificação' : 
+                 'Monitoramento Ativo'}
               </h2>
-              
-              {documents.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-center text-sm">
-                      <p>Nenhuma informação encontrada.</p>
-                      <p className="text-xs mt-2">Clique em "Buscar" para iniciar.</p>
-                  </div>
-              ) : (
-                  <div className="space-y-2 overflow-y-auto max-h-[600px] pr-2">
-                      {documents.map((doc, idx) => (
-                          <div 
-                              key={`${doc.url}-${idx}`}
-                              onClick={() => setSelectedDoc(doc)}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all relative
-                                  ${selectedDoc?.url === doc.url 
-                                      ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-200' 
-                                      : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'}`}
-                          >
-                              <div className="flex flex-col gap-1">
-                                  {doc.editionLabel ? (
-                                    <>
-                                      <span className="text-sm font-bold text-slate-800">
-                                          {doc.editionLabel}
-                                      </span>
-                                      <span className="text-xs text-slate-500 line-clamp-1 border-t border-slate-100 pt-1 mt-1">
-                                          {doc.title}
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <span className="text-sm font-medium text-slate-700 leading-snug line-clamp-2">
-                                        {doc.title}
-                                    </span>
-                                  )}
-                              </div>
-                              <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                                  <span className="flex items-center gap-1">
-                                    <Globe className="w-3 h-3" />
-                                    Web
-                                  </span>
-                                  {doc.url === settings.lastCheckedUrl && (
-                                      <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                                          NOVO
-                                      </span>
-                                  )}
-                              </div>
-                          </div>
-                      ))}
-                  </div>
-              )}
-            </div>
-        </div>
-
-        {/* Right Column: Content Viewer (6 cols) */}
-        <div className="lg:col-span-6 h-full min-h-[500px]">
-          {selectedDoc ? (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full sticky top-6">
-              <div className="bg-slate-50 border-b border-slate-200 p-6">
-                <div className="flex justify-between items-start gap-4">
-                  <div>
-                      <h1 className="text-xl font-bold text-slate-900 leading-tight">
-                        {selectedDoc.editionLabel ? selectedDoc.editionLabel : selectedDoc.title}
-                      </h1>
-                      {selectedDoc.editionLabel && (
-                        <h2 className="text-sm text-slate-600 mt-1">{selectedDoc.title}</h2>
-                      )}
-                      <p className="text-sm text-slate-500 mt-2 flex items-center gap-2">
-                        <Calendar className="w-4 h-4" />
-                        Identificado em: {selectedDoc.dateFound ? new Date(selectedDoc.dateFound).toLocaleDateString() : '-'}
-                      </p>
-                  </div>
-                  <a 
-                      href={selectedDoc.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs font-medium bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors shadow-sm"
-                  >
-                      Acessar Fonte <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-
-              <div className="p-8 overflow-y-auto flex-1 bg-white">
-                {selectedDoc.contentSummary ? (
-                    <>
-                      <div className="flex items-center gap-2 mb-4 text-amber-600 font-semibold text-sm uppercase tracking-wide">
-                          <Sparkles className="w-4 h-4" /> Visão Geral (Gemini)
-                      </div>
-                      <div className="prose prose-slate prose-sm max-w-none text-slate-700">
-                          <ReactMarkdown>{selectedDoc.contentSummary}</ReactMarkdown>
-                      </div>
-                    </>
-                ) : (
-                    <div className="text-center py-12 text-slate-500">
-                        <p>Nenhum resumo disponível para este resultado.</p>
-                    </div>
-                )}
-              </div>
-              
-              <div className="bg-slate-50 border-t border-slate-200 p-3 text-[10px] text-slate-400 text-center">
-                Gemini 2.5 Flash + Google Search Grounding
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col items-center justify-center p-12 text-center text-slate-400">
-              <FileText className="w-16 h-16 mb-4 text-slate-200" />
-              <h3 className="text-lg font-semibold text-slate-600 mb-2">Nenhum item selecionado</h3>
-              <p className="max-w-xs mx-auto text-sm">
-                Selecione um resultado da busca para ver os detalhes encontrados pela IA.
+              <p className="text-slate-500 mt-1">
+                 Próxima verificação automática às <span className="font-medium text-slate-700">{settings.morningCheck}</span> e <span className="font-medium text-slate-700">{settings.nightCheck}</span>
               </p>
             </div>
-          )}
+          </div>
+
+          <button
+            onClick={performCheck}
+            disabled={status === ScrapeStatus.CHECKING}
+            className="group flex items-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <RefreshCw className={`w-5 h-5 ${status === ScrapeStatus.CHECKING ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+            {status === ScrapeStatus.CHECKING ? 'Verificando...' : 'Verificar Agora'}
+          </button>
+      </div>
+
+      {/* Content Area */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Left Column: List */}
+        <div className="lg:col-span-1 flex flex-col gap-4">
+           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider px-2">Documentos Recentes</h3>
+           {documents.length === 0 ? (
+             <div className="bg-white rounded-xl p-8 text-center border border-slate-100 border-dashed">
+                <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-300">
+                  <Archive className="w-6 h-6" />
+                </div>
+                <p className="text-slate-500 text-sm">Nenhum documento carregado.</p>
+             </div>
+           ) : (
+             <div className="flex flex-col gap-3">
+               {documents.map((doc, idx) => (
+                 <button 
+                   key={idx}
+                   onClick={() => setSelectedDoc(doc)}
+                   className={`text-left p-4 rounded-xl border transition-all duration-200 relative overflow-hidden
+                     ${selectedDoc === doc 
+                       ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' 
+                       : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-md text-slate-600'}`}
+                 >
+                   {doc.isNew && (
+                     <div className="absolute top-0 right-0 p-1.5">
+                       <span className="flex h-3 w-3">
+                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                         <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                       </span>
+                     </div>
+                   )}
+                   <div className="flex items-start justify-between mb-2">
+                     <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDoc === doc ? 'bg-blue-500/50 text-blue-50' : 'bg-slate-100 text-slate-500'}`}>
+                       {doc.publicationDate}
+                     </span>
+                     <ExternalLink className={`w-4 h-4 ${selectedDoc === doc ? 'text-blue-200' : 'text-slate-300'}`} />
+                   </div>
+                   <h4 className="font-semibold leading-tight mb-1">{doc.title}</h4>
+                   <p className={`text-xs ${selectedDoc === doc ? 'text-blue-100' : 'text-slate-400'} line-clamp-2`}>
+                     {doc.contentSummary ? doc.contentSummary.slice(0, 100).replace(/[#*]/g, '') : 'Clique para ver detalhes...'}
+                   </p>
+                 </button>
+               ))}
+             </div>
+           )}
         </div>
 
+        {/* Right Column: Details */}
+        <div className="lg:col-span-2">
+           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider px-2 mb-4">Detalhes do Documento</h3>
+           
+           {!selectedDoc ? (
+             <div className="bg-slate-50 rounded-2xl h-96 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200">
+                <Search className="w-12 h-12 mb-3 opacity-20" />
+                <p>Selecione um documento para visualizar a análise.</p>
+             </div>
+           ) : (
+             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                {/* Document Header */}
+                <div className="bg-slate-50 p-6 border-b border-slate-100">
+                   <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <h2 className="text-2xl font-bold text-slate-900 mb-2">{selectedDoc.title}</h2>
+                        <div className="flex items-center gap-4 text-sm text-slate-500">
+                           <div className="flex items-center gap-1.5">
+                             <Calendar className="w-4 h-4" />
+                             {selectedDoc.publicationDate}
+                           </div>
+                           <div className="flex items-center gap-1.5">
+                             <Globe className="w-4 h-4" />
+                             Diário Oficial
+                           </div>
+                        </div>
+                      </div>
+                      
+                      <a 
+                        href={selectedDoc.url} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+                      >
+                        <FileText className="w-4 h-4" />
+                        Ver PDF Original
+                      </a>
+                   </div>
+                </div>
+
+                {/* AI Summary Content */}
+                <div className="p-8">
+                   <div className="flex items-center gap-2 mb-6 text-blue-600">
+                      <Sparkles className="w-5 h-5" />
+                      <h3 className="font-bold uppercase tracking-wide text-sm">Resumo Inteligente</h3>
+                   </div>
+                   
+                   <div className="prose prose-slate max-w-none prose-headings:font-bold prose-a:text-blue-600 hover:prose-a:text-blue-700 prose-sm">
+                      {selectedDoc.contentSummary ? (
+                        <ReactMarkdown>{selectedDoc.contentSummary}</ReactMarkdown>
+                      ) : (
+                        <div className="flex items-center gap-3 text-slate-500 bg-slate-50 p-4 rounded-lg">
+                           <Loader2 className="w-5 h-5 animate-spin" />
+                           <p>Processando resumo...</p>
+                        </div>
+                      )}
+                   </div>
+                   
+                   {/* Disclaimer */}
+                   <div className="mt-8 pt-6 border-t border-slate-100">
+                      <div className="flex gap-3 items-start p-4 rounded-lg bg-orange-50 text-orange-800 text-xs">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <p>
+                          Este resumo foi gerado automaticamente por Inteligência Artificial e pode conter imprecisões. 
+                          Sempre verifique o documento original (PDF) para informações oficiais e legais.
+                        </p>
+                      </div>
+                   </div>
+                </div>
+             </div>
+           )}
+        </div>
       </div>
     </div>
   );
-}
+};

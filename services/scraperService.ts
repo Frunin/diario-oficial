@@ -1,4 +1,4 @@
-import { GazetteDocument } from '../types';
+import { GazetteDocument } from './types';
 import { GoogleGenAI } from "@google/genai";
 import { extractTextFromPdf } from './pdfService';
 import { summarizeGazette } from './geminiService';
