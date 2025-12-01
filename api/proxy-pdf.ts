@@ -1,73 +1,67 @@
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',
 };
 
-export default async function handler(request: Request) {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
+export default async function handler(request, response) {
+  // CORS Headers
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    response.status(200).end();
+    return;
   }
 
-  const url = new URL(request.url);
-  const targetUrl = url.searchParams.get('url');
+  const protocol = request.headers['x-forwarded-proto'] || 'http';
+  const host = request.headers.host;
+  const fullUrl = new URL(request.url, `${protocol}://${host}`);
+  const targetUrl = fullUrl.searchParams.get('url');
 
   if (!targetUrl) {
-    return new Response('URL parameter is required', { 
-      status: 400,
-      headers: corsHeaders 
-    });
+    response.status(400).send('URL parameter is required');
+    return;
   }
 
-  const browserHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Referer': 'https://saojoaodelrei.mg.gov.br/'
-  };
-
   try {
-    // Attempt 1: Direct Fetch
-    let response = await fetch(targetUrl, { headers: browserHeaders });
-
-    // Attempt 2: Fallback Proxy (if blocked)
-    // corsproxy.io is better for binary/PDF data than allorigins
-    if (response.status === 403 || response.status === 401) {
-       console.warn(`[ProxyPDF] Direct blocked. Retrying ${targetUrl} via corsproxy.io...`);
-       const fallbackUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
-       const fallbackResponse = await fetch(fallbackUrl);
-       
-       if (fallbackResponse.ok) {
-           response = fallbackResponse;
-       }
-    }
-
-    if (!response.ok) {
-       return new Response(`Failed to fetch PDF: ${response.status} ${response.statusText}`, { 
-         status: response.status,
-         headers: corsHeaders
-       });
-    }
-
-    const pdfBuffer = await response.arrayBuffer();
-    
-    return new Response(pdfBuffer, {
-      status: 200,
+    // Using Node.js built-in fetch (available in Node 18+)
+    const fetchResponse = await fetch(targetUrl, {
       headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': 'inline',
-        'Cache-Control': 'public, max-age=3600',
-        ...corsHeaders
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'application/pdf,application/octet-stream,*/*',
+        'Referer': 'https://saojoaodelrei.mg.gov.br/'
       }
     });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return new Response(`Internal Server Error: ${msg}`, { 
-      status: 500,
-      headers: corsHeaders
-    });
+
+    if (!fetchResponse.ok) {
+        // Fallback to proxy if direct fetch fails (403/401)
+        if (fetchResponse.status === 403 || fetchResponse.status === 401) {
+            console.warn(`Direct PDF fetch blocked (${fetchResponse.status}). Trying fallback proxy...`);
+            const fallbackUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+            const fallbackRes = await fetch(fallbackUrl);
+            
+            if (fallbackRes.ok) {
+                const buffer = await fallbackRes.arrayBuffer();
+                response.setHeader('Content-Type', 'application/pdf');
+                response.send(Buffer.from(buffer));
+                return;
+            }
+        }
+
+        response.status(fetchResponse.status).send(`Failed to fetch PDF: ${fetchResponse.statusText}`);
+        return;
+    }
+
+    const arrayBuffer = await fetchResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Cache-Control', 'public, max-age=3600');
+    response.send(buffer);
+
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('PDF Proxy Error:', msg);
+    response.status(500).send(`Internal Server Error: ${msg}`);
   }
 }

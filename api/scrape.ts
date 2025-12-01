@@ -1,84 +1,89 @@
+import chromium from '@sparticuz/chromium';
+import puppeteer from 'puppeteer-core';
+
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',
+  maxDuration: 60, // Allow more time for browser launch
 };
 
-export default async function handler(request: Request) {
-  // Common CORS headers
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  };
+export default async function handler(request, response) {
+  // CORS Headers
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle CORS Preflight
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    response.status(200).end();
+    return;
   }
 
-  const url = new URL(request.url);
-  const targetUrl = url.searchParams.get('url');
+  // Parse URL from query string
+  // Vercel Node.js handler receives standard IncomingMessage, so we construct URL manually
+  const protocol = request.headers['x-forwarded-proto'] || 'http';
+  const host = request.headers.host;
+  const fullUrl = new URL(request.url, `${protocol}://${host}`);
+  const targetUrl = fullUrl.searchParams.get('url');
 
   if (!targetUrl) {
-    return new Response(JSON.stringify({ success: false, error: 'URL parameter is required' }), {
-      status: 400,
-      headers: { 'content-type': 'application/json', ...corsHeaders }
-    });
+    response.status(400).json({ error: 'URL parameter is required' });
+    return;
   }
 
-  // Simplified headers to avoid fingerprinting that might trigger strict firewalls
-  const browserHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  };
+  let browser = null;
 
   try {
-    // Attempt 1: Direct Fetch
-    let response = await fetch(targetUrl, {
-      headers: browserHeaders
-    });
-
-    // Attempt 2: Fallback Proxy (if blocked by 403 Forbidden or 401 Unauthorized)
-    if (response.status === 403 || response.status === 401) {
-      console.warn(`[Proxy] Direct access to ${targetUrl} blocked (${response.status}). Retrying via fallback proxy...`);
-      
-      // We use allorigins.win as it's reliable for text/html content
-      const fallbackUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-      
-      const fallbackResponse = await fetch(fallbackUrl, {
-        headers: {
-            'User-Agent': browserHeaders['User-Agent'] // Pass UA to proxy
-        }
-      });
-      
-      // If fallback succeeds, use it
-      if (fallbackResponse.ok) {
-        response = fallbackResponse;
-      } else {
-        // If fallback also fails, throw the original error or the fallback error
-        console.error(`[Proxy] Fallback failed: ${fallbackResponse.status}`);
-      }
+    // Determine executable path: local chrome vs serverless chromium
+    let executablePath = await chromium.executablePath();
+    
+    // Fallback logic for local development (if variable is not set by sparticuz)
+    if (!executablePath) {
+      // Common paths for Linux/Mac/Win if testing locally without the lambda layer
+      // You might need to adjust this if running `vercel dev` locally without sparticuz support
+      console.log("Running locally? Chromium path not found, trying defaults."); 
+      executablePath = process.platform === 'win32' 
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
+        : '/usr/bin/google-chrome';
     }
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch site: ${response.status} ${response.statusText}`);
-    }
-    
-    const html = await response.text();
-    
-    return new Response(JSON.stringify({ success: true, html }), {
-      status: 200,
-      headers: { 
-        'content-type': 'application/json',
-        'Cache-Control': 'no-store',
-        ...corsHeaders
-      }
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
+
+    const page = await browser.newPage();
+    
+    // Mimic a real user agent
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+
+    // Go to URL
+    await page.goto(targetUrl, { 
+      waitUntil: 'domcontentloaded',
+      timeout: 45000 
+    });
+
+    // Wait for the container that usually holds the data
+    try {
+        await page.waitForSelector('#conteudo_generico_1014', { timeout: 10000 });
+    } catch (e) {
+        console.warn("Selector #conteudo_generico_1014 not found, returning content anyway.");
+    }
+
+    const html = await page.content();
+
+    response.status(200).json({ success: true, html });
+
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ success: false, error: message }), {
-      status: 500,
-      headers: { 'content-type': 'application/json', ...corsHeaders }
+    console.error('Puppeteer Error:', error);
+    response.status(500).json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown Puppeteer error' 
     });
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
   }
 }
