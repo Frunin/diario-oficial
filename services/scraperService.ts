@@ -7,11 +7,10 @@ import { summarizeGazette } from './geminiService';
 let htmlCache: { url: string; content: string; timestamp: number } | null = null;
 const CACHE_DURATION_MS = 1000 * 60 * 10; // 10 minutes
 
-// Get the API URL from build configuration (see vite.config.ts)
-// @ts-ignore
-const API_BASE = process.env.SCRAPER_API_URL;
+// Use absolute URL for the Production Vercel API
+const API_BASE = 'https://diario-oficial-two.vercel.app/api';
 
-// Helper to fetch HTML content exclusively via Backend Server
+// Helper to fetch HTML content via Vercel Proxy
 async function fetchHtml(url: string, validateContent?: (html: string) => boolean): Promise<string> {
     
     // 1. Check Local Memory Cache first
@@ -25,35 +24,36 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
         }
     }
 
-    // 2. Fetch from Backend Python Server
+    // 2. Fetch from Vercel API Route
     try {
-        const localController = new AbortController();
-        // 60s timeout for Selenium to launch and scrape
-        const timeoutId = setTimeout(() => localController.abort(), 60000); 
+        console.log(`[Fetch] Conectando ao proxy (${API_BASE})...`);
         
-        console.log(`[Fetch] Conectando ao servidor de coleta em ${API_BASE}...`);
+        // Pass the target URL as a query parameter
+        const proxyUrl = `${API_BASE}/scrape?url=${encodeURIComponent(url)}`;
         
-        const localRes = await fetch(`${API_BASE}/scrape`, { 
-            signal: localController.signal,
+        const localRes = await fetch(proxyUrl, { 
             cache: 'no-store',
             headers: {
                 'Accept': 'application/json'
             }
         });
-        clearTimeout(timeoutId);
 
         if (!localRes.ok) {
-            throw new Error(`Servidor respondeu com status: ${localRes.status}`);
+            if (localRes.status === 404) {
+                throw new Error(`API Backend não encontrada no endereço ${API_BASE}. Verifique o deploy no Vercel.`);
+            }
+            const errText = await localRes.text().catch(() => 'Sem detalhes');
+            throw new Error(`Proxy respondeu com status: ${localRes.status} (${errText})`);
         }
 
         const data = await localRes.json();
         
         if (data.success && data.html) {
-            console.log("[Fetch] Sucesso: HTML recebido do servidor.");
+            console.log("[Fetch] Sucesso: HTML recebido.");
             
             // Validate content
             if (validateContent && !validateContent(data.html)) {
-                throw new Error("HTML recebido do servidor é inválido ou incompleto.");
+                throw new Error("HTML recebido é inválido ou incompleto.");
             }
 
             // Update Cache
@@ -65,16 +65,14 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
 
             return data.html;
         } else {
-            throw new Error(data.error || "Servidor não retornou HTML.");
+            throw new Error(data.error || "Proxy não retornou HTML.");
         }
 
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[Fetch] Erro fatal na conexão: ${msg}`);
+        console.error(`[Fetch] Erro fatal: ${msg}`);
         throw new Error(
-            `Falha na conexão com o servidor de coleta (${API_BASE}). \n` +
-            `Verifique se o serviço Python está rodando e acessível.\n` +
-            `Erro: ${msg}`
+            `Falha na conexão. ${msg}`
         );
     }
 }
@@ -87,7 +85,7 @@ export const checkForNewGazette = async (logger?: (msg: string) => void): Promis
   
   try {
     const targetUrl = 'https://saojoaodelrei.mg.gov.br/pagina/9837/Diario%20Oficial';
-    log(`[System] Iniciando comunicação com o servidor de coleta...`);
+    log(`[System] Iniciando busca...`);
 
     let pageHtml = await fetchHtml(targetUrl, (html) => html.includes('conteudo_generico_1014'));
     log(`[Scraper] HTML processado com sucesso.`);
@@ -175,7 +173,7 @@ export const checkForNewGazette = async (logger?: (msg: string) => void): Promis
         const newestDoc = recentDocs[0];
         
         try {
-            log(`[PDF] Solicitando download ao servidor...`);
+            log(`[PDF] Solicitando download via proxy...`);
             const text = await extractTextFromPdf(newestDoc.url);
             newestDoc.rawText = text.slice(0, 500);
             
