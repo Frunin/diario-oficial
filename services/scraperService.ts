@@ -72,9 +72,10 @@ async function findLatestGazetteViaGemini(log: (msg: string) => void): Promise<G
     try {
         log("[Fallback] Site bloqueado. Usando Google Search (Gemini)...");
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        // Updated prompt to not strictly require 2025
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: 'Encontre o link do PDF e a data do "Diário Oficial de São João del-Rei" mais recente publicado em 2025. O site oficial é saojoaodelrei.mg.gov.br.',
+            contents: 'Encontre o link do PDF e a data do "Diário Oficial de São João del-Rei" mais recente publicado. O site oficial é saojoaodelrei.mg.gov.br.',
             config: { tools: [{ googleSearch: {} }] }
         });
 
@@ -197,10 +198,8 @@ export const checkForNewGazette = async (logger?: (msg: string) => void): Promis
         throw fetchError;
     }
 
-    // Filter for 2025
-    const currentDocs = documents.filter(doc => 
-        doc.publicationDate.includes('2025') || (doc.editionLabel && doc.editionLabel.includes('2025'))
-    );
+    // Removed specific year filter to allow all recent documents
+    const currentDocs = documents;
 
     // Sort by ID (descending)
     currentDocs.sort((a, b) => {
@@ -209,7 +208,7 @@ export const checkForNewGazette = async (logger?: (msg: string) => void): Promis
         return idB - idA;
     });
 
-    log(`[Scraper] ${currentDocs.length} documentos de 2025 encontrados.`);
+    log(`[Scraper] ${currentDocs.length} documentos encontrados.`);
 
     const recentDocs = currentDocs.slice(0, 5);
 
