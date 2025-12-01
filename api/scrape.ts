@@ -25,31 +25,45 @@ export default async function handler(request: Request) {
     });
   }
 
+  // Simplified headers to avoid fingerprinting that might trigger strict firewalls
+  const browserHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+  };
+
   try {
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Cache-Control': 'max-age=0',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Referer': 'https://www.google.com/'
-      }
+    // Attempt 1: Direct Fetch
+    let response = await fetch(targetUrl, {
+      headers: browserHeaders
     });
+
+    // Attempt 2: Fallback Proxy (if blocked by 403 Forbidden or 401 Unauthorized)
+    if (response.status === 403 || response.status === 401) {
+      console.warn(`[Proxy] Direct access to ${targetUrl} blocked (${response.status}). Retrying via fallback proxy...`);
+      
+      // We use allorigins.win as it's reliable for text/html content
+      const fallbackUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+      
+      const fallbackResponse = await fetch(fallbackUrl, {
+        headers: {
+            'User-Agent': browserHeaders['User-Agent'] // Pass UA to proxy
+        }
+      });
+      
+      // If fallback succeeds, use it
+      if (fallbackResponse.ok) {
+        response = fallbackResponse;
+      } else {
+        // If fallback also fails, throw the original error or the fallback error
+        console.error(`[Proxy] Fallback failed: ${fallbackResponse.status}`);
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch site: ${response.status} ${response.statusText}`);
     }
     
-    // We get the text. Note: If the site uses legacy encodings (ISO-8859-1), 
-    // fetch usually handles it if the server sends the correct Content-Type header.
     const html = await response.text();
     
     return new Response(JSON.stringify({ success: true, html }), {

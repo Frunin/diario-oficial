@@ -3,14 +3,12 @@ export const config = {
 };
 
 export default async function handler(request: Request) {
-  // Common CORS headers
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
-  // Handle CORS Preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -25,15 +23,27 @@ export default async function handler(request: Request) {
     });
   }
 
+  const browserHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Referer': 'https://saojoaodelrei.mg.gov.br/'
+  };
+
   try {
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': 'https://saojoaodelrei.mg.gov.br/'
-      }
-    });
+    // Attempt 1: Direct Fetch
+    let response = await fetch(targetUrl, { headers: browserHeaders });
+
+    // Attempt 2: Fallback Proxy (if blocked)
+    // corsproxy.io is better for binary/PDF data than allorigins
+    if (response.status === 403 || response.status === 401) {
+       console.warn(`[ProxyPDF] Direct blocked. Retrying ${targetUrl} via corsproxy.io...`);
+       const fallbackUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+       const fallbackResponse = await fetch(fallbackUrl);
+       
+       if (fallbackResponse.ok) {
+           response = fallbackResponse;
+       }
+    }
 
     if (!response.ok) {
        return new Response(`Failed to fetch PDF: ${response.status} ${response.statusText}`, { 

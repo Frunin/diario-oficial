@@ -46,7 +46,7 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
             
             // Check for specific blockage errors
             if (errText.includes("403") || errText.includes("Forbidden")) {
-                throw new Error("O site oficial recusou a conexão (Erro 403). O firewall da prefeitura pode estar bloqueando acessos via nuvem temporariamente.");
+                throw new Error("403_FORBIDDEN");
             }
 
             throw new Error(`Proxy respondeu com status: ${localRes.status} (${errText})`);
@@ -73,17 +73,69 @@ async function fetchHtml(url: string, validateContent?: (html: string) => boolea
         } else {
             // Check for nested errors from the JSON
             if (data.error && (data.error.includes("403") || data.error.includes("Forbidden"))) {
-                 throw new Error("O site oficial recusou a conexão (Erro 403). Bloqueio de segurança detectado.");
+                 throw new Error("403_FORBIDDEN");
             }
             throw new Error(data.error || "Proxy não retornou HTML.");
         }
 
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        if (msg === "403_FORBIDDEN") {
+           throw new Error("O site oficial recusou a conexão (Erro 403). Tentando estratégia alternativa...");
+        }
         console.error(`[Fetch] Erro fatal: ${msg}`);
         throw new Error(
             `Falha na conexão: ${msg}`
         );
+    }
+}
+
+// Fallback method using Gemini Search Grounding
+async function findLatestGazetteViaGemini(log: (msg: string) => void): Promise<GazetteDocument[]> {
+    try {
+        log("[Fallback] Site bloqueado. Usando Google Search (Gemini) para encontrar documentos...");
+        
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash', // Supports search tool
+            contents: 'Encontre o link do PDF e a data do "Diário Oficial de São João del-Rei" mais recente publicado em 2025. O site oficial é saojoaodelrei.mg.gov.br. Retorne apenas os dados.',
+            config: {
+                tools: [{ googleSearch: {} }]
+            }
+        });
+
+        // Parse Grounding Metadata to find links
+        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        
+        if (!chunks || chunks.length === 0) {
+            throw new Error("A busca não retornou resultados válidos.");
+        }
+
+        const documents: GazetteDocument[] = [];
+        
+        // Try to construct a document from search results
+        // This is a best-effort fallback
+        const mainChunk = chunks.find(c => c.web?.uri && c.web.uri.includes('saojoaodelrei.mg.gov.br'));
+        
+        if (mainChunk && mainChunk.web) {
+            documents.push({
+                title: mainChunk.web.title || "Diário Oficial (Resultado de Busca)",
+                url: mainChunk.web.uri,
+                dateFound: new Date().toISOString(),
+                publicationDate: new Date().toLocaleDateString('pt-BR'),
+                isNew: false,
+                contentSummary: `### 🔍 Resultado de Busca\n\nEste documento foi localizado via Google Search pois o acesso direto ao site oficial estava instável.\n\n${response.text}`,
+                editionLabel: "Busca Web",
+                rawText: ""
+            });
+            log("[Fallback] Documento encontrado via Google Search.");
+        }
+
+        return documents;
+
+    } catch (error) {
+        console.error("Search Fallback Error:", error);
+        return [];
     }
 }
 
@@ -97,7 +149,18 @@ export const checkForNewGazette = async (logger?: (msg: string) => void): Promis
     const targetUrl = 'https://saojoaodelrei.mg.gov.br/pagina/9837/Diario%20Oficial';
     log(`[System] Iniciando busca...`);
 
-    let pageHtml = await fetchHtml(targetUrl, (html) => html.includes('conteudo_generico_1014'));
+    let pageHtml = '';
+    
+    try {
+        pageHtml = await fetchHtml(targetUrl, (html) => html.includes('conteudo_generico_1014'));
+    } catch (fetchError) {
+        // Trigger Fallback if 403 or blocked
+        if (fetchError instanceof Error && fetchError.message.includes("403")) {
+            return await findLatestGazetteViaGemini(log);
+        }
+        throw fetchError;
+    }
+
     log(`[Scraper] HTML processado com sucesso.`);
 
     const parser = new DOMParser();
@@ -207,6 +270,7 @@ export const checkForNewGazette = async (logger?: (msg: string) => void): Promis
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : 'Erro desconhecido';
     log(`[Scraper] Erro: ${errMsg}`);
+    // If it's a known fallback/error, rethrow to be handled by UI
     throw error;
   }
 };
