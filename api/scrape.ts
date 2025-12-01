@@ -7,7 +7,7 @@ export const config = {
 };
 
 // Fallback fetch function if Puppeteer fails
-async function fetchFallback(url) {
+async function fetchFallback(url: string) {
     console.log("[Fallback] Puppeteer failed, attempting standard fetch...");
     const response = await fetch(url, {
         headers: {
@@ -21,13 +21,13 @@ async function fetchFallback(url) {
 
     if (!response.ok) {
         const text = await response.text();
-        throw new Error(`Fallback Fetch Failed: ${response.status} ${response.statusText} - ${text.substring(0, 100)}`);
+        throw new Error(`Fallback Fetch Failed: ${response.status} ${response.statusText}`);
     }
 
     return await response.text();
 }
 
-export default async function handler(request, response) {
+export default async function handler(request: any, response: any) {
   // CORS Headers
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -51,22 +51,10 @@ export default async function handler(request, response) {
   let browser = null;
 
   try {
-    // Determine environment
     const isLocal = !process.env.AWS_REGION && !process.env.VERCEL_REGION;
     
-    // Configure Chromium
-    // IMPORTANT: Essential args for serverless environments
-    const args = [
-        ...chromium.args, 
-        "--disable-gpu", 
-        "--disable-dev-shm-usage", 
-        "--disable-setuid-sandbox", 
-        "--no-sandbox", 
-        "--no-zygote"
-    ];
-
+    // Configure Chromium executable path
     let executablePath = "";
-    
     if (isLocal) {
         if (process.platform === 'win32') {
             executablePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -76,44 +64,51 @@ export default async function handler(request, response) {
             executablePath = '/usr/bin/google-chrome';
         }
     } else {
+        // Standard Vercel/AWS environment path resolution
         executablePath = await chromium.executablePath();
     }
 
     browser = await puppeteer.launch({
-      args: args,
-      defaultViewport: chromium.defaultViewport,
+      args: [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process', // Important for serverless
+        '--no-zygote'
+      ],
+      defaultViewport: { width: 1920, height: 1080 },
       executablePath: executablePath,
-      headless: isLocal ? false : chromium.headless,
+      headless: isLocal ? false : true,
       ignoreHTTPSErrors: true,
-    });
+    } as any);
 
     const page = await browser.newPage();
     
     // Spoof User Agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
     
-    // Set extra headers
     await page.setExtraHTTPHeaders({
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     });
 
-    // Navigate
     await page.goto(targetUrl, { 
       waitUntil: 'domcontentloaded', 
       timeout: 25000 
     });
 
-    // Check for 403 via title
+    // Simple 403 check
     const title = await page.title();
     if (title.includes("403") || title.includes("Forbidden") || title.includes("Access Denied")) {
         throw new Error("403_FORBIDDEN_DETECTED_IN_PUPPETEER");
     }
 
-    // Attempt to wait for content, but don't crash if it's missing (might be static HTML)
+    // Attempt to wait for content, but allow fallback if selector is missing
     try {
-        await page.waitForSelector('#conteudo_generico_1014', { timeout: 4000 });
+        await page.waitForSelector('#conteudo_generico_1014', { timeout: 5000 });
     } catch (e) {
-        // Ignore timeout, just grab content
+        // Selector not found, proceeding with raw content
     }
 
     const html = await page.content();
@@ -122,9 +117,6 @@ export default async function handler(request, response) {
   } catch (error) {
     console.error('Puppeteer Error:', error);
     
-    // --- FALLBACK MECHANISM ---
-    // If Puppeteer fails (library missing, memory limit, timeout) OR gets blocked
-    // Try standard fetch as a last resort
     try {
         const html = await fetchFallback(targetUrl);
         response.status(200).json({ success: true, html, note: "Served via Fallback Fetch" });
